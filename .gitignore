@@ -3,3 +3,10 @@ node_modules/
 .env
 
 build/
+
+.vscode/
+
+docs/
+
+.DS_Store
+contracts/Loot.sol

@@ -22,13 +22,19 @@ interface IInsurancePool {
 
     function pendingDegis(address) external view returns (uint256);
 
+    function checkCapacity(uint256) external view returns (bool);
+
     function updateWhenBuy(
         uint256,
         uint256,
         address
     ) external returns (bool);
 
-    function updateWhenExpire(uint256, uint256) external;
+    function updateWhenExpire(
+        uint256,
+        uint256,
+        address
+    ) external;
 
     function payClaim(
         uint256,
