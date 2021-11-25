@@ -9,6 +9,7 @@ import "./interfaces/IFarmingPool.sol";
 
 contract FarmingPool is IFarmingPool {
     using SafeERC20 for IERC20;
+    using SafeERC20 for IDegisToken;
 
     address public owner;
 
@@ -36,9 +37,9 @@ contract FarmingPool is IFarmingPool {
 
     uint256 public startBlock; // Farming starts from a certain block number
 
-    constructor(address _degis, uint256 _startBlock) {
+    constructor(address _degis) {
         degis = IDegisToken(_degis);
-        startBlock = _startBlock;
+
         _nextPoolId = 1;
     }
 
@@ -63,7 +64,7 @@ contract FarmingPool is IFarmingPool {
     function pendingDegis(uint256 _poolId, address _userAddress)
         public
         view
-        notZeroAddress
+        notZeroAddress(_userAddress)
         returns (uint256)
     {
         PoolInfo storage poolInfo = poolList[_poolId];
@@ -90,6 +91,14 @@ contract FarmingPool is IFarmingPool {
         } else {
             return 0;
         }
+    }
+
+    /**
+     * @notice Set the start block number
+     * @param _startBlock New start block number
+     */
+    function setStartBlock(uint256 _startBlock) external onlyOwner {
+        startBlock = _startBlock;
     }
 
     /**
@@ -278,20 +287,20 @@ contract FarmingPool is IFarmingPool {
 
     /**
      * @notice Safe degis transfer (check if the pool has enough DEGIS token)
-     * @param _to: User's address
-     * @param _amount: Amount to transfer
+     * @param _to User's address
+     * @param _amount Amount to transfer
      */
     function safeDegisTransfer(address _to, uint256 _amount) internal {
         uint256 DegisBalance = degis.balanceOf(address(this));
         if (_amount > DegisBalance) {
-            DEGIS.transfer(_to, DegisBalance);
+            degis.transfer(_to, DegisBalance);
         } else {
             degis.transfer(_to, _amount);
         }
     }
 
     /**
-     * @notice Update all farming pools (except for those stopped)
+     * @notice Update all farming pools (except for those stopped ones)
      */
     function massUpdatePools() public {
         uint256 length = poolList.length;
@@ -303,11 +312,16 @@ contract FarmingPool is IFarmingPool {
 
     /**
      * @notice Check if a lptoken has been added into the pool before
+     * @param _lpTokenAddress LP token address
+     * @return _isInPool Wether this lp already in pool
      */
-    function _alreadyInPool(address _lpTokenAddress) internal returns (bool) {
+    function _alreadyInPool(address _lpTokenAddress)
+        internal
+        returns (bool _isInPool)
+    {
         uint256 poolId = poolMapping[_lpTokenAddress];
         // Never been added
-        if (poolId == 0) return false;
-        else return true;
+        if (poolId == 0) _isInPool = false;
+        else _isInPool = true;
     }
 }
