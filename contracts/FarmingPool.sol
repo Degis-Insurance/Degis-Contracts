@@ -7,41 +7,67 @@ import "./interfaces/ILPToken.sol";
 import "./interfaces/IDegisToken.sol";
 import "./interfaces/IFarmingPool.sol";
 
+/**
+ * @title  Farming Pool
+ * @notice This contract is similar to MasterChef
+ * @dev    The pool id starts from 1 not 0!
+ */
+
 contract FarmingPool is IFarmingPool {
     using SafeERC20 for IERC20;
     using SafeERC20 for IDegisToken;
 
     address public owner;
 
-    uint256 public _nextPoolId; // poolId starts from 1, zero means not in the farm
+    // PoolId starts from 1
+    uint256 public _nextPoolId;
 
     struct PoolInfo {
-        IERC20 lpToken;
+        address lpToken;
         uint256 degisPerBlock;
         uint256 lastRewardBlock;
         uint256 accDegisPerShare;
     }
+    PoolInfo[] public poolList;
+
     mapping(address => uint256) poolMapping; // lptoken => poolId
+
     mapping(uint256 => bool) isFarming; // poolId => alreadyFarming
-    PoolInfo[] poolList;
 
     struct UserInfo {
         uint256 rewardDebt; // degis reward debt
         uint256 stakingBalance; // the amount of a user's staking in the pool
     }
     // poolId => userAddress => userInfo
-    mapping(uint256 => mapping(address => UserInfo)) userInfo;
+    mapping(uint256 => mapping(address => UserInfo)) public userInfo;
 
     // The reward token is degis
-    IDegisToken degis;
+    IDegisToken public degis;
 
     uint256 public startBlock; // Farming starts from a certain block number
 
     constructor(address _degis) {
         degis = IDegisToken(_degis);
 
+        owner = msg.sender;
+
+        // Start from 1
         _nextPoolId = 1;
+
+        // Manually fit the poolList[0] to avoid potential misleading
+        poolList.push(
+            PoolInfo({
+                lpToken: address(0),
+                degisPerBlock: 0,
+                lastRewardBlock: 0,
+                accDegisPerShare: 0
+            })
+        );
     }
+
+    // ---------------------------------------------------------------------------------------- //
+    // ************************************** Modifiers *************************************** //
+    // ---------------------------------------------------------------------------------------- //
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only the owner can call this function");
@@ -56,10 +82,15 @@ contract FarmingPool is IFarmingPool {
         _;
     }
 
+    // ---------------------------------------------------------------------------------------- //
+    // *********************************** View Functions ************************************* //
+    // ---------------------------------------------------------------------------------------- //
+
     /**
      * @notice Check the amount of pending degis reward
-     * @param _poolId: PoolId of this farming pool
-     * @param _userAddress: User address
+     * @param _poolId PoolId of this farming pool
+     * @param _userAddress User address
+     * @return pendingDegisAmount Amount of pending degis
      */
     function pendingDegis(uint256 _poolId, address _userAddress)
         public
@@ -73,7 +104,7 @@ contract FarmingPool is IFarmingPool {
 
         UserInfo storage user = userInfo[_poolId][_userAddress];
 
-        uint256 lp_balance = poolInfo.lpToken.balanceOf(_userAddress);
+        uint256 lp_balance = IERC20(poolInfo.lpToken).balanceOf(_userAddress);
 
         uint256 accDegisPerShare = poolInfo.accDegisPerShare;
 
@@ -94,6 +125,31 @@ contract FarmingPool is IFarmingPool {
     }
 
     /**
+     * @notice Get the total pool list
+     */
+    function getPoolList() external view returns (PoolInfo[] memory) {
+        return poolList;
+    }
+
+    /**
+     * @notice Get user balance
+     * @param _poolId Id of the pool
+     * @param _userAddress Address of the user
+     * @return _balance User's balance (lpToken)
+     */
+    function getUserBalance(uint256 _poolId, address _userAddress)
+        external
+        view
+        returns (uint256 _balance)
+    {
+        return userInfo[_poolId][_userAddress].stakingBalance;
+    }
+
+    // ---------------------------------------------------------------------------------------- //
+    // ************************************* Set Functions ************************************ //
+    // ---------------------------------------------------------------------------------------- //
+
+    /**
      * @notice Set the start block number
      * @param _startBlock New start block number
      */
@@ -101,20 +157,25 @@ contract FarmingPool is IFarmingPool {
         startBlock = _startBlock;
     }
 
+    // ---------------------------------------------------------------------------------------- //
+    // *********************************** Main Functions ************************************* //
+    // ---------------------------------------------------------------------------------------- //
+
     /**
      * @notice Add a new lp to the pool. Can only be called by the owner.
-     * @param _lpToken: LP token address
-     * @param _degisPerBlock: Reward distribution per block for this new pool
-     * @param _withUpdate: Whether update all pools' status
+     * @param _lpToken LP token address
+     * @param _degisPerBlock Reward distribution per block for this new pool
+     * @param _withUpdate Whether update all pools' status
      */
     function add(
         address _lpToken,
         uint256 _degisPerBlock,
         bool _withUpdate
-    ) public onlyOwner {
-        // Check if already exists
+    ) public notZeroAddress(_lpToken) onlyOwner {
+        // Check if already exists, if the poolId is 0, that means not in the pool
         bool isInPool = _alreadyInPool(_lpToken);
 
+        // Maybe better to use require, I just want to test this form
         if (isInPool) {
             revert AlreadyInPool(_lpToken);
         }
@@ -127,9 +188,10 @@ contract FarmingPool is IFarmingPool {
             ? block.number
             : startBlock;
 
+        // Push this new pool into the list
         poolList.push(
             PoolInfo({
-                lpToken: IERC20(_lpToken),
+                lpToken: _lpToken,
                 degisPerBlock: _degisPerBlock,
                 lastRewardBlock: lastRewardBlock,
                 accDegisPerShare: 0
@@ -147,9 +209,9 @@ contract FarmingPool is IFarmingPool {
 
     /**
      * @notice Update the degisPerBlock for a specific pool (set to 0 to stop farming)
-     * @param _poolId: Id of the farming pool
-     * @param _degisPerBlock: New reward amount per block
-     * @param _withUpdate: Whether update all the pool
+     * @param _poolId Id of the farming pool
+     * @param _degisPerBlock New reward amount per block
+     * @param _withUpdate Whether update all the pool
      */
     function setDegisReward(
         uint256 _poolId,
@@ -179,8 +241,8 @@ contract FarmingPool is IFarmingPool {
 
     /**
      * @notice Stake LP token into the farming pool
-     * @param _poolId: Id of the farming pool
-     * @param _amount: Staking amount
+     * @param _poolId Id of the farming pool
+     * @param _amount Staking amount
      */
     function stake(uint256 _poolId, uint256 _amount) public {
         PoolInfo storage pool = poolList[_poolId];
@@ -197,7 +259,8 @@ contract FarmingPool is IFarmingPool {
             safeDegisTransfer(msg.sender, pending);
         }
 
-        pool.lpToken.safeTransferFrom(
+        // Approve
+        IERC20(pool.lpToken).safeTransferFrom(
             address(msg.sender),
             address(this),
             _amount
@@ -211,8 +274,8 @@ contract FarmingPool is IFarmingPool {
 
     /**
      * @notice Withdraw lptoken from the pool
-     * @notice _poolId: Id of the farming pool
-     * @notice _amount: Amount of lp tokens to withdraw
+     * @param _poolId Id of the farming pool
+     * @param _amount Amount of lp tokens to withdraw
      */
     function withdraw(uint256 _poolId, uint256 _amount) public {
         PoolInfo storage pool = poolList[_poolId];
@@ -231,21 +294,21 @@ contract FarmingPool is IFarmingPool {
         user.stakingBalance -= _amount;
         user.rewardDebt = user.stakingBalance * pool.accDegisPerShare;
 
-        pool.lpToken.safeTransfer(address(msg.sender), _amount);
+        IERC20(pool.lpToken).safeTransfer(address(msg.sender), _amount);
 
         emit Withdraw(msg.sender, _poolId, _amount);
     }
 
     /**
      * @notice Update the pool's reward status
-     * @param _poolId: Id of the farming pool
+     * @param _poolId Id of the farming pool
      */
     function updatePool(uint256 _poolId) public {
         PoolInfo storage pool = poolList[_poolId];
         if (block.number <= pool.lastRewardBlock) {
             return;
         }
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
+        uint256 lpSupply = IERC20(pool.lpToken).balanceOf(address(this));
         if (lpSupply == 0) {
             pool.lastRewardBlock = block.number;
             return;
@@ -258,6 +321,8 @@ contract FarmingPool is IFarmingPool {
 
         pool.accDegisPerShare += degisReward / lpSupply;
         pool.lastRewardBlock = block.number;
+
+        emit PoolUpdated(_poolId);
     }
 
     /**
@@ -286,6 +351,38 @@ contract FarmingPool is IFarmingPool {
     }
 
     /**
+     * @notice Update all farming pools (except for those stopped ones)
+     */
+    function massUpdatePools() public {
+        uint256 length = poolList.length;
+        for (uint256 poolId = 0; poolId < length; poolId++) {
+            if (isFarming[poolId] == false) continue;
+            else updatePool(poolId);
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------- //
+    // ********************************** Internal Functions ********************************** //
+    // ---------------------------------------------------------------------------------------- //
+
+    /**
+     * @notice Check if a lptoken has been added into the pool before
+     * @dev This can be written as a modifier, I just want to test the error form
+     * @param _lpTokenAddress LP token address
+     * @return _isInPool Wether this lp already in pool
+     */
+    function _alreadyInPool(address _lpTokenAddress)
+        internal
+        view
+        returns (bool _isInPool)
+    {
+        uint256 poolId = poolMapping[_lpTokenAddress];
+        // Never been added
+        if (poolId == 0) _isInPool = false;
+        else _isInPool = true;
+    }
+
+    /**
      * @notice Safe degis transfer (check if the pool has enough DEGIS token)
      * @param _to User's address
      * @param _amount Amount to transfer
@@ -297,31 +394,5 @@ contract FarmingPool is IFarmingPool {
         } else {
             degis.transfer(_to, _amount);
         }
-    }
-
-    /**
-     * @notice Update all farming pools (except for those stopped ones)
-     */
-    function massUpdatePools() public {
-        uint256 length = poolList.length;
-        for (uint256 poolId = 0; poolId < length; poolId++) {
-            if (isFarming[poolId] == false) continue;
-            else updatePool(poolId);
-        }
-    }
-
-    /**
-     * @notice Check if a lptoken has been added into the pool before
-     * @param _lpTokenAddress LP token address
-     * @return _isInPool Wether this lp already in pool
-     */
-    function _alreadyInPool(address _lpTokenAddress)
-        internal
-        returns (bool _isInPool)
-    {
-        uint256 poolId = poolMapping[_lpTokenAddress];
-        // Never been added
-        if (poolId == 0) _isInPool = false;
-        else _isInPool = true;
     }
 }

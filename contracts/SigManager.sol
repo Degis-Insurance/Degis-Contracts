@@ -5,10 +5,11 @@ import "./interfaces/ISigManager.sol";
 import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
 
 /**
- * @title Signature Manager
+ * @title  Signature Manager
  * @notice Signature is used when submitting new applications.
  *         The premium should be decided by the pricing model and be signed by a private key.
  *         Other submission will not be accepted.
+ *         Please keep the signer key safe.
  */
 contract SigManager is ISigManager {
     using ECDSA for bytes32;
@@ -87,22 +88,22 @@ contract SigManager is ISigManager {
      * @notice Check signature when buying a new policy (avoid arbitrary premium amount)
      * @param signature 65 byte array: [[v (1)], [r (32)], [s (32)]]
      * @param _flightNumber Flight number
-     * @param _address User address
+     * @param _userAddress User address
      * @param _premium Policy premium
      * @param _deadline Deadline of a policy
      */
     function checkSignature(
         bytes calldata signature,
         string memory _flightNumber,
-        address _address,
+        address _userAddress,
         uint256 _premium,
         uint256 _deadline
     ) external view {
         bytes32 hashData = keccak256(
-            abi.encode(
+            abi.encodePacked(
                 _SUBMIT_CLAIM_TYPEHASH,
                 _flightNumber,
-                _address,
+                _userAddress,
                 _premium,
                 _deadline
             )
