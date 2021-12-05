@@ -106,7 +106,7 @@ contract FarmingPool is IFarmingPool {
 
         UserInfo storage user = userInfo[_poolId][_userAddress];
 
-        uint256 lp_balance = IERC20(poolInfo.lpToken).balanceOf(_userAddress);
+        uint256 lp_balance = IERC20(poolInfo.lpToken).balanceOf(address(this));
 
         uint256 accDegisPerShare = poolInfo.accDegisPerShare;
 
@@ -310,18 +310,20 @@ contract FarmingPool is IFarmingPool {
         if (block.number <= pool.lastRewardBlock) {
             return;
         }
+
         uint256 lpSupply = IERC20(pool.lpToken).balanceOf(address(this));
         if (lpSupply == 0) {
             pool.lastRewardBlock = block.number;
             return;
         }
+
         uint256 blocks = block.number - pool.lastRewardBlock;
         uint256 degisReward = blocks * pool.degisPerBlock;
 
         // Don't forget to set the farming pool as minter
         degis.mint(address(this), degisReward);
 
-        pool.accDegisPerShare += (degisReward / lpSupply) * 1e18;
+        pool.accDegisPerShare += (degisReward * 1e18) / lpSupply;
         pool.lastRewardBlock = block.number;
 
         emit PoolUpdated(_poolId);
